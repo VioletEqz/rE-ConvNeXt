@@ -7,3 +7,5 @@ def get_model_factory(repository: Any,
                       model_name: str) -> Callable[..., torch.nn.Module]:
     if hasattr(repository, model_name):
         return getattr(repository, model_name)
+    else:
+        raise ValueError(f'Model {model_name} does not exist.')
