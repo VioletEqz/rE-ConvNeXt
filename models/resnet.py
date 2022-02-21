@@ -1,20 +1,10 @@
-from typing import Type, Any, List, Union
+from typing import Optional, Type, Any, List, Union
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-
-def conv3x3(in_planes: int, out_planes: int, stride: int = 1, depthwise: bool = False) -> nn.Conv2d:
-    """3x3 convolution with padding"""
-    groups = in_planes if depthwise else 1
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, groups=groups, bias=False)
-
-
-def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
-    """1x1 convolution"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
-
+from common import conv3x3, conv1x1
 
 class BasicBlock(nn.Module):
     expansion: int = 1
@@ -27,32 +17,15 @@ class BasicBlock(nn.Module):
     ) -> None:
         super().__init__()
 
-        # BatchNorm2d factory
         norm_layer = nn.BatchNorm2d
-
-        # ReLU
         self.act = nn.ReLU(inplace=True)
 
-        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.n1 = norm_layer(planes)
         self.conv2 = conv3x3(planes, planes)
         self.n2 = norm_layer(planes)
-        
-        # Projection shortcut to match dimensions if needed
-        if stride != 1 or inplanes != planes * self.expansion:
-            self.downsample = nn.Sequential(
-                conv1x1(inplanes, planes * self.expansion, stride),
-                norm_layer(planes * self.expansion),
-            )
-        else:
-            self.downsample = None
-
-        self.stride = stride
 
     def forward(self, x: Tensor) -> Tensor:
-        identity = x
-
         out = self.conv1(x)
         out = self.n1(out)
         out = self.act(out)
@@ -60,19 +33,10 @@ class BasicBlock(nn.Module):
         out = self.conv2(out)
         out = self.n2(out)
 
-        if self.downsample is not None:
-            identity = self.downsample(x)
-
-        out += identity
-        out = self.act(out)
-
         return out
 
 
 class Bottleneck(nn.Module):
-    # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
-    # while original implementation places the stride at the first 1x1 convolution(self.conv1)
-    
     expansion: int = 4
 
     def __init__(
@@ -83,34 +47,17 @@ class Bottleneck(nn.Module):
     ) -> None:
         super().__init__()
         
-        # BatchNorm2d factory
         norm_layer = nn.BatchNorm2d
-            
-        # ReLU
         self.act = nn.ReLU(inplace=True)
 
-        # Both self.conv2 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv1x1(inplanes, planes)
         self.n1 = norm_layer(planes)
-        self.conv2 = conv3x3(planes, planes, stride)
+        self.conv2 = conv3x3(planes, planes, stride)  # Place stride here
         self.n2 = norm_layer(planes)
         self.conv3 = conv1x1(planes, planes * self.expansion)
         self.n3 = norm_layer(planes * self.expansion)
 
-        # Projection shortcut to match dimensions if needed
-        if stride != 1 or inplanes != planes * self.expansion:
-            self.downsample = nn.Sequential(
-                conv1x1(inplanes, planes * self.expansion, stride),
-                norm_layer(planes * self.expansion),
-            )
-        else:
-            self.downsample = None
-
-        self.stride = stride
-
     def forward(self, x: Tensor) -> Tensor:
-        identity = x
-
         out = self.conv1(x)
         out = self.n1(out)
         out = self.act(out)
@@ -122,12 +69,26 @@ class Bottleneck(nn.Module):
         out = self.conv3(out)
         out = self.n3(out)
 
-        if self.downsample is not None:
-            identity = self.downsample(x)
+        return out
 
+
+class ResBlock(nn.Module):
+    def __init__(
+        self,
+        main_path: nn.Module,
+        projection: Optional[nn.Module] = None
+    ) -> None:
+        super().__init__()
+        self.act = nn.ReLU(inplace=True)
+        self.main_path = main_path
+        self.projection = projection
+
+    def forward(self, x: Tensor) -> Tensor:
+        out = self.main_path(x)
+        identity = self.projection(x) if self.projection is not None else x
         out += identity
         out = self.act(out)
-
+        
         return out
 
 
@@ -136,15 +97,17 @@ class ResNet(nn.Module):
         self,
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
-        num_classes: int = 1000,
+        num_classes: int = 1000
     ) -> None:
         super().__init__()
         
+        self.norm_layer = nn.BatchNorm2d
+
         # Downsampling stem
         self.inplanes = 64
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.n1 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
+        self.n1 = nn.BatchNorm2d(self.inplanes)
+        self.act = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         # Res1 -> Res4
@@ -166,13 +129,28 @@ class ResNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def _make_layer(self, block: Type[Bottleneck], planes: int, num_blocks: int, stride: int = 1) -> nn.Sequential:
-        layers = []
-        # Downsample if needed (stride > 1) at first block
-        layers.append(block(self.inplanes, planes, stride=stride))
+        norm_layer = self.norm_layer
 
+        layers = []
+        
+        # First block of the layer
+        if stride != 1 or self.inplanes != planes * block.expansion:
+            projection = nn.Sequential(
+                conv1x1(self.inplanes, planes * block.expansion, stride),
+                norm_layer(planes * block.expansion)
+            )
+        else:
+            projection = None
+        layers.append(
+            ResBlock(block(self.inplanes, planes, stride=stride), projection=projection)
+        )
+
+        # Remaining blocks of the layer
         self.inplanes = planes * block.expansion
         for _ in range(1, num_blocks):
-            layers.append(block(self.inplanes, planes, stride=1))
+            layers.append(
+                ResBlock(block(self.inplanes, planes, stride=1), projection=None)
+            )
 
         return nn.Sequential(*layers)
 
@@ -180,10 +158,10 @@ class ResNet(nn.Module):
         # According to torchvision:
         # "This exists since TorchScript doesn't support inheritance, so the superclass method
         # (this one) needs to have a name other than `forward` that can be accessed in a subclass"
-        # I don't get what it means though
+
         x = self.conv1(x)
         x = self.n1(x)
-        x = self.relu(x)
+        x = self.act(x)
         x = self.maxpool(x)
 
         x = self.layer1(x)
