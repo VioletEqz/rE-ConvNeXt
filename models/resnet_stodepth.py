@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from common import StochasticModule, conv3x3, conv1x1
+from common import StochasticModule, benchmark, conv3x3, conv1x1
 
 class BasicBlock(nn.Module):
     expansion: int = 1
@@ -215,8 +215,5 @@ def resnet200(**kwargs: Any) -> ResNet:
 
 
 if __name__ == "__main__":
-    model = resnet50(num_classes=100, stodepth_survival_rate=0.9)
-    print(model)
-    print(sum(p.numel() for p in model.parameters()))
-    sample_input = torch.randn(1, 3, 224, 224)
-    output = model(sample_input)
+    model = resnet50(stodepth_survival_rate=0.9)
+    benchmark(model)
