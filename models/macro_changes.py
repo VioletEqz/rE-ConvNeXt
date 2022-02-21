@@ -1,39 +1,10 @@
-from typing import Optional, Type, Any, List, Union
+from typing import Optional, Type, Any, List
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-from common import benchmark, conv3x3, conv1x1
-
-class BasicBlock(nn.Module):
-    expansion: int = 1
-
-    def __init__(
-        self,
-        inplanes: int,
-        planes: int,
-        stride: int = 1
-    ) -> None:
-        super().__init__()
-
-        norm_layer = nn.BatchNorm2d
-        self.act = nn.ReLU(inplace=True)
-
-        self.conv1 = conv3x3(inplanes, planes, stride)
-        self.n1 = norm_layer(planes)
-        self.conv2 = conv3x3(planes, planes)
-        self.n2 = norm_layer(planes)
-
-    def forward(self, x: Tensor) -> Tensor:
-        out = self.conv1(x)
-        out = self.n1(out)
-        out = self.act(out)
-
-        out = self.conv2(out)
-        out = self.n2(out)
-
-        return out
+from common import StochasticModule, benchmark, conv3x3, conv1x1
 
 
 class Bottleneck(nn.Module):
@@ -52,7 +23,7 @@ class Bottleneck(nn.Module):
 
         self.conv1 = conv1x1(inplanes, planes)
         self.n1 = norm_layer(planes)
-        self.conv2 = conv3x3(planes, planes, stride)  # Place stride here
+        self.conv2 = conv3x3(planes, planes, stride)
         self.n2 = norm_layer(planes)
         self.conv3 = conv1x1(planes, planes * self.expansion)
         self.n3 = norm_layer(planes * self.expansion)
@@ -76,11 +47,15 @@ class ResBlock(nn.Module):
     def __init__(
         self,
         main_path: nn.Module,
-        projection: Optional[nn.Module] = None
+        projection: Optional[nn.Module] = None,
+        stodepth_survival_rate: float = 1.
     ) -> None:
         super().__init__()
         self.act = nn.ReLU(inplace=True)
-        self.main_path = main_path
+
+        self.main_path = StochasticModule(main_path, stodepth_survival_rate) \
+                         if stodepth_survival_rate < 1. else main_path
+        
         self.projection = projection
 
     def forward(self, x: Tensor) -> Tensor:
@@ -92,23 +67,23 @@ class ResBlock(nn.Module):
         return out
 
 
-class ResNet(nn.Module):
+class ConvNext(nn.Module):
     def __init__(
         self,
-        block: Type[Union[BasicBlock, Bottleneck]],
+        block: Bottleneck,
         layers: List[int],
-        num_classes: int = 1000
+        num_classes: int = 1000,
+        stodepth_survival_rate: float = 1.
     ) -> None:
         super().__init__()
         
+        self.stodepth_survival_rate = stodepth_survival_rate
         self.norm_layer = nn.BatchNorm2d
 
-        # Downsampling stem
+        # NOTE: Patchify downsampling stem
         self.inplanes = 64
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=4, stride=4, padding=0, bias=False)
         self.n1 = nn.BatchNorm2d(self.inplanes)
-        self.act = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         # Res1 -> Res4
         self.layer1 = self._make_layer(block, 64, layers[0])
@@ -142,27 +117,29 @@ class ResNet(nn.Module):
         else:
             projection = None
         layers.append(
-            ResBlock(block(self.inplanes, planes, stride=stride), projection=projection)
+            ResBlock(
+                block(self.inplanes, planes, stride=stride),
+                projection=projection,
+                stodepth_survival_rate=self.stodepth_survival_rate
+            )
         )
 
         # Remaining blocks of the layer
         self.inplanes = planes * block.expansion
         for _ in range(1, num_blocks):
             layers.append(
-                ResBlock(block(self.inplanes, planes, stride=1), projection=None)
+                ResBlock(
+                    block(self.inplanes, planes, stride=1),
+                    projection=None,
+                    stodepth_survival_rate=self.stodepth_survival_rate
+                )
             )
 
         return nn.Sequential(*layers)
 
     def _forward_impl(self, x: Tensor) -> Tensor:
-        # According to torchvision:
-        # "This exists since TorchScript doesn't support inheritance, so the superclass method
-        # (this one) needs to have a name other than `forward` that can be accessed in a subclass"
-
         x = self.conv1(x)
         x = self.n1(x)
-        x = self.act(x)
-        x = self.maxpool(x)
 
         x = self.layer1(x)
         x = self.layer2(x)
@@ -179,27 +156,19 @@ class ResNet(nn.Module):
         return self._forward_impl(x)
 
 
-def _resnet(block: Type[Bottleneck], layers: List[int], **kwargs: Any) -> ResNet:
-    model = ResNet(block, layers, **kwargs)
+def _convnext(block: Type[Bottleneck], layers: List[int], **kwargs: Any) -> ConvNext:
+    model = ConvNext(block, layers, **kwargs)
     return model
 
 
-def resnet18(**kwargs: Any) -> ResNet:
-    return _resnet(BasicBlock, [2, 2, 2, 2], **kwargs)
+# NOTE: New stage ratios
+def convnext_t(**kwargs: Any) -> ConvNext:
+    return _convnext(Bottleneck, [3, 3, 9, 3], **kwargs)
 
-def resnet34(**kwargs: Any) -> ResNet:
-    return _resnet(BasicBlock, [3, 4, 6, 3], **kwargs)
-
-def resnet50(**kwargs: Any) -> ResNet:
-    return _resnet(Bottleneck, [3, 4, 6, 3], **kwargs)
-
-def resnet101(**kwargs: Any) -> ResNet:
-    return _resnet(Bottleneck, [3, 4, 23, 3], **kwargs)
-
-def resnet200(**kwargs: Any) -> ResNet:
-    return _resnet(Bottleneck, [3, 24, 36, 3], **kwargs)
+def convnext_s(**kwargs: Any) -> ConvNext:
+    return _convnext(Bottleneck, [3, 3, 27, 3], **kwargs)
 
 
 if __name__ == "__main__":
-    model = resnet50()
+    model = convnext_t(stodepth_survival_rate=0.9)
     benchmark(model)

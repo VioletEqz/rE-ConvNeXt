@@ -1,12 +1,19 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
+from ptflops import get_model_complexity_info
+
+def benchmark(model, input_size=(3, 224, 224), print_layers=False):
+    macs, params = get_model_complexity_info(model, input_size, as_strings=True,
+                                             print_per_layer_stat=print_layers, verbose=False)
+    print(f'Computational complexity: {macs}')
+    print(f'Number of parameters: {params}')
 
 
-def conv3x3(in_planes: int, out_planes: int, stride: int = 1, depthwise: bool = False) -> nn.Conv2d:
+def conv3x3(in_planes: int, out_planes: int, stride: int = 1, depthwise: bool = False, bias: bool = False) -> nn.Conv2d:
     """3x3 convolution with padding"""
     groups = in_planes if depthwise else 1
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, groups=groups, bias=False)
+    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, groups=groups, bias=bias)
 
 
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
