@@ -38,8 +38,7 @@ def train(opt):
     model = model(num_classes=CLASSES).to(device)
 
     # Softmax loss
-    # Note: Now with label smoothing
-    criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+    criterion = torch.nn.CrossEntropyLoss()
 
     # AdamW optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
