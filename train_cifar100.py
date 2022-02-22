@@ -7,7 +7,7 @@ import models
 
 from utils.general import get_model_factory
 from utils.metrics import accuracy
-from utils.augmentations import get_mixup, get_transform
+from utils.augmentations import CIFAR100_augmentation
 
 def train(opt):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -17,7 +17,7 @@ def train(opt):
     EPOCHS = opt['epochs']
     CLASSES = opt['classes']
 
-    transform = get_transform(input_size=32)
+    transform, mixup = CIFAR100_augmentation(input_size=32)
     
     cifar_train = torchvision.datasets.CIFAR100(
         root='./data/cifar100', train=True, transform=transform, 
@@ -57,9 +57,6 @@ def train(opt):
     # To-do: some more checks for the output directory
     # to support storing multiple results from training.
 
-    # Get Mixup sampler
-    Mixup = get_mixup(num_classes=CLASSES, mode = 'batch')
-
     # Training
     best_val_loss = float('inf')
     print('Epoch\tTrain Loss\tTrain Acc\tVal Loss\tVal Acc\t\tLearning Rate\tTime')
@@ -81,8 +78,8 @@ def train(opt):
                 batchX = batchX.to(device)
                 batchY = batchY.to(device)
                 # Get mixup sample
-                if Mixup is not None:
-                    batchX, batchY = Mixup(batchX, batchY)
+                if mixup is not None:
+                    batchX, batchY = mixup(batchX, batchY)
                 pred = model(batchX)
                 loss = criterion(pred, batchY)
 
