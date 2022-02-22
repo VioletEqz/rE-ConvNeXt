@@ -17,13 +17,14 @@ def train(opt):
     EPOCHS = opt['epochs']
     CLASSES = opt['classes']
 
-    transform = get_transform()
+    transform = get_transform(input_size=32)
+    
     cifar_train = torchvision.datasets.CIFAR100(
         root='./data/cifar100', train=True, transform=transform, 
         target_transform=None, download=True)
         
     cifar_test = torchvision.datasets.CIFAR100(
-        root='./data/cifar100', train=False, transform=transform,
+        root='./data/cifar100', train=False, transform=None,
         target_transform=None, download=True)
 
     train_loader = torch.utils.data.DataLoader(
