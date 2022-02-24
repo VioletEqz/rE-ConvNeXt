@@ -88,7 +88,7 @@ class ConvNext(nn.Module):
         self.conv1 = nn.Conv2d(3, width[0], kernel_size=4, stride=4, padding=0, bias=False)
         self.n1 = nn.BatchNorm2d(width[0])
 
-        # NOTE: Res1 -> Res4 with custom widths
+        # Res1 -> Res4 with custom widths
         self.layer1 = self._make_layer(block, width[0], layers[0])
         self.layer2 = self._make_layer(block, width[1], layers[1], stride=2)
         self.layer3 = self._make_layer(block, width[2], layers[2], stride=2)
