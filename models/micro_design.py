@@ -37,10 +37,10 @@ class InvertedBottleneck(nn.Module):
         self.conv3 = conv1x1(expand_width, planes)
         self.n3 = norm_layer(planes)
 
+        # Removed an activation function on the first convolutional layer
     def forward(self, x: Tensor) -> Tensor:
         out = self.conv1(x)
         out = self.n1(out)
-        out = self.act(out)
 
         out = self.conv2(out)
         out = self.n2(out)
@@ -60,8 +60,7 @@ class ResBlock(nn.Module):
         stodepth_survival_rate: float = 1.
     ) -> None:
         super().__init__()
-        # Replacing RELU with GELU
-        self.act = nn.ReLU()
+        # Removed the activation function on the out path of the block
 
         self.main_path = StochasticModule(main_path, stodepth_survival_rate) \
                          if stodepth_survival_rate < 1. else main_path
@@ -72,7 +71,6 @@ class ResBlock(nn.Module):
         out = self.main_path(x)
         identity = self.projection(x) if self.projection is not None else x
         out += identity
-        out = self.act(out)
         
         return out
 
