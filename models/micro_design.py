@@ -18,7 +18,8 @@ class InvertedBottleneck(nn.Module):
     ) -> None:
         super().__init__()
         
-        norm_layer = nn.BatchNorm2d
+        # Replacing BatchNorm2d with LayerNorm
+        norm_layer = nn.LayerNorm
         # Replacing RELU with GELU
         self.act = nn.GELU()
 
@@ -31,7 +32,7 @@ class InvertedBottleneck(nn.Module):
         # However, the 1st way seems more *correct*, so we will use that
         # Notice that we also use 7x7 depthwise conv here
         self.conv1 = conv7x7(inplanes, planes, stride, depthwise=True)
-        self.n1 = norm_layer(planes)
+        self.n1 = norm_layer(planes, eps=1e-6)
         self.conv2 = conv1x1(planes, expand_width)
         self.conv3 = conv1x1(expand_width, planes)
 
