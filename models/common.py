@@ -24,6 +24,10 @@ def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
+def downsample(in_planes: int, out_planes: int, kernel_size=2, stride=2, eps=1e-6) -> nn.Sequential:
+    return nn.Sequential(
+                        nn.LayerNorm(in_planes, eps=eps),
+                        nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride),)
 
 class StochasticModule(nn.Module):
     """

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from common import StochasticModule, benchmark, conv1x1, conv7x7
+from common import StochasticModule, benchmark, conv1x1, conv7x7, downsample
 
 
 class InvertedBottleneck(nn.Module):
@@ -85,21 +85,30 @@ class ConvNext(nn.Module):
         super().__init__()
         
         self.stodepth_survival_rate = stodepth_survival_rate
-        self.norm_layer = nn.BatchNorm2d
+        # NOTE: Changed the norm layer to LayerNorm
+        self.norm_layer = nn.LayerNorm
 
         # Patchify downsampling stem
         self.inplanes = width[0]
         self.conv1 = nn.Conv2d(3, width[0], kernel_size=4, stride=4, padding=0, bias=False)
-        self.n1 = nn.BatchNorm2d(width[0])
+        # NOTE: Changed the norm layer to LayerNorm
+        self.n1 = nn.LayerNorm(width[0],eps=1e-6)
 
         # Res1 -> Res4 with custom widths
+        # NOTE: Added a downsample layer before every stage except the first one, which
+        # uses the stem instead.
         self.layer1 = self._make_layer(block, width[0], layers[0])
+        self.downsample1 = downsample(width[0], width[1])
         self.layer2 = self._make_layer(block, width[1], layers[1], stride=2)
+        self.downsample2 = downsample(width[1], width[2])
         self.layer3 = self._make_layer(block, width[2], layers[2], stride=2)
+        self.downsample3 = downsample(width[2], width[3])
         self.layer4 = self._make_layer(block, width[3], layers[3], stride=2)
 
         # Pooling and FC
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # NOTE: added a LayerNorm after global average pooling
+        self.n2 = nn.LayerNorm(width[3],eps=1e-6)
         self.fc = nn.Linear(width[3], num_classes)
 
         # Initialize weights
@@ -108,7 +117,7 @@ class ConvNext(nn.Module):
                 # Since we won't be using ReLU, we should replace the initializer as well 
                 nn.init.trunc_normal_(m.weight, mean=0, std=0.01)
                 nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
+            elif isinstance(m, nn.LayerNorm):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
@@ -121,7 +130,7 @@ class ConvNext(nn.Module):
         if stride != 1 or self.inplanes != planes:
             projection = nn.Sequential(
                 conv1x1(self.inplanes, planes, stride),
-                norm_layer(planes)
+                norm_layer(planes,eps = 1e-6)
             )
         else:
             projection = None
@@ -150,12 +159,17 @@ class ConvNext(nn.Module):
         x = self.conv1(x)
         x = self.n1(x)
 
+        # NOTE: Adding the new layers to the forward function pipeline
         x = self.layer1(x)
+        x = self.downsample1(x)
         x = self.layer2(x)
+        x = self.downsample2(x)
         x = self.layer3(x)
+        x = self.downsample3(x)
         x = self.layer4(x)
 
         x = self.avgpool(x)
+        x = self.n2(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
 
