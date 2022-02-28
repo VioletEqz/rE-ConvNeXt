@@ -33,21 +33,18 @@ class InvertedBottleneck(nn.Module):
         self.conv1 = conv7x7(inplanes, planes, stride, depthwise=True)
         self.n1 = norm_layer(planes)
         self.conv2 = conv1x1(planes, expand_width)
-        self.n2 = norm_layer(expand_width)
         self.conv3 = conv1x1(expand_width, planes)
-        self.n3 = norm_layer(planes)
 
         # Removed an activation function on the first convolutional layer
+        # Removed two normalization layers after the first convolutional layer
     def forward(self, x: Tensor) -> Tensor:
         out = self.conv1(x)
         out = self.n1(out)
 
         out = self.conv2(out)
-        out = self.n2(out)
         out = self.act(out)
 
         out = self.conv3(out)
-        out = self.n3(out)
 
         return out
 
