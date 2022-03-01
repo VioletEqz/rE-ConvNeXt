@@ -1,31 +1,33 @@
-from typing import Optional, Any, List, Tuple
+import math
+from typing import Optional, Any, List
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-from common import benchmark
-
 
 class StochasticDepth(nn.Module):
-    """Randomly drop a layer"""
+    """Randomly drop a module"""
     def __init__(self, module: nn.Module, survival_rate: float = 1.) -> None:
         super().__init__()
         self.module = module
+        self.survival_rate = survival_rate
         self._drop = torch.distributions.Bernoulli(torch.tensor(1 - survival_rate))
     
     def forward(self, x: Tensor) -> Tensor:
         return 0 if self.training and self._drop.sample() else self.module(x)
+    
+    def __repr__(self) -> str:
+        return self.module.__repr__() + f", stodepth_survival_rate={self.survival_rate:.2f}"
 
 
 class LayerNorm(nn.LayerNorm):
     """Permute the input tensor so that the channel dimension is the last one."""
-    def __init__(self, num_features: int, eps: float = 1e-5, **kwargs: Any) -> None:
+    def __init__(self, num_features: int, eps: float = 1e-6, **kwargs: Any) -> None:
         super().__init__(num_features, eps=eps, **kwargs)
     
     def forward(self, x: Tensor) -> Tensor:
         return super().forward(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
-
 
 def dw_conv7x7(in_planes: int, out_planes: int, **kwargs: Any) -> nn.Conv2d:
     return nn.Conv2d(in_planes, out_planes, 7, padding=3, groups=in_planes, **kwargs)
@@ -42,7 +44,6 @@ class CNBlock(nn.Module):
 
     def __init__(self, planes: int, stodepth_survive: float = 1.0) -> None:
         super().__init__()
-
         expand_width = planes * self.expansion
         main = nn.Sequential(
             dw_conv7x7(planes, planes),
@@ -68,53 +69,60 @@ class ConvNext(nn.Module):
         assert len(layers) == len(widths) == 4, "Length of layers and widths param must be 4"
         super().__init__()
 
-        
         # Patchify downsampling stem
-        stem = nn.Sequential(
+        self.stem = nn.Sequential(
             patch_conv(3, widths[0], patch_size=4),
-            LayerNorm(widths[0], eps=1e-6)
+            LayerNorm(widths[0])
         )
 
-        # Res1 -> Res4
-        stages = []
-        for layer, width in zip(layers, widths):
-            stages.append(
+        # Stage 1 -> 4 and intermediate downsampling layers
+        for idx, (layer, width) in enumerate(zip(layers, widths)):
+            self.add_module(
+                f"stage{idx + 1}",
+                nn.Sequential(*[CNBlock(width, stodepth_survive) for _ in range(layer)])
+            )
+            if idx == 3: break
+            self.add_module(
+                f"ds{idx + 1}",
                 nn.Sequential(
-                    *[CNBlock(width, stodepth_survive) for _ in range(layer)]
+                    LayerNorm(width),
+                    patch_conv(width, widths[idx + 1], patch_size=2)
                 )
             )
-        self.stages = nn.ModuleList(stages)
-
-        # Intermediate downsampling layers
-        ds_layers = [stem]
-        for cur_width, next_width in zip(widths, widths[1:]):
-            ds_layers.append(
-                nn.Sequential(
-                    LayerNorm(cur_width, eps=1e-6),
-                    patch_conv(cur_width, next_width, patch_size=2)
-                )
-            )
-        self.ds_layers = nn.ModuleList(ds_layers)
 
         # Pooling and FC
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.n2 = LayerNorm(widths[-1], eps=1e-6)
-        self.fc = nn.Linear(widths[-1], num_classes)
+        self.norm = LayerNorm(widths[-1])
+        self.fc = nn.Linear(widths[-1], num_classes
+        )
 
         # Initialize weights
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.trunc_normal_(m.weight, mean=0, std=0.01)
-                nn.init.constant_(m.bias, 0)
-
+                nn.init.kaiming_normal_(m.weight, mode="fan_out")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.LayerNorm):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Linear):
+                init_range = 1.0 / math.sqrt(m.out_features)
+                nn.init.uniform_(m.weight, -init_range, init_range)
+                nn.init.zeros_(m.bias)
 
     def _forward_impl(self, x: Tensor) -> Tensor:
-        for ds_layer, stage in zip(self.ds_layers, self.stages):
-            x = ds_layer(x)
-            x = stage(x)
+        x = self.stem(x)
+
+        x = self.stage1(x)
+        x = self.ds1(x)
+        x = self.stage2(x)
+        x = self.ds2(x)
+        x = self.stage3(x)
+        x = self.ds3(x)
+        x = self.stage4(x)
 
         x = self.avgpool(x)
-        x = self.n2(x)
+        x = self.norm(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
 
@@ -146,6 +154,6 @@ def convnext_xl(**kwargs: Any) -> ConvNext:
 
 
 if __name__ == "__main__":
-    model = convnext_t(stodepth_survive=1.0)
+    from .common import benchmark
+    model = convnext_t()
     benchmark(model)
-    print(model)
