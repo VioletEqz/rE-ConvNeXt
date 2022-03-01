@@ -93,8 +93,7 @@ class ConvNext(nn.Module):
         # Pooling and FC
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.norm = LayerNorm(widths[-1])
-        self.fc = nn.Linear(widths[-1], num_classes
-        )
+        self.fc = nn.Linear(widths[-1], num_classes)
 
         # Initialize weights
         for m in self.modules():
