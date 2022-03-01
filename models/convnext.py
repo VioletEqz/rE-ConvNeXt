@@ -40,7 +40,7 @@ def patch_conv(in_planes: int, out_planes: int, patch_size: int, **kwargs: Any) 
 class CNBlock(nn.Module):
     expansion: int = 4
 
-    def __init__(self, planes: int) -> None:
+    def __init__(self, planes: int, stodepth_survive: float = 1.0) -> None:
         super().__init__()
 
         expand_width = planes * self.expansion
@@ -51,7 +51,7 @@ class CNBlock(nn.Module):
             nn.GELU(),
             conv1x1(expand_width, planes)
         )
-        self.main = main
+        self.main = main if stodepth_survive == 1.0 else StochasticDepth(main, stodepth_survive)
         
     def forward(self, x: Tensor) -> Tensor:
         return x + self.main(x)
@@ -80,8 +80,7 @@ class ConvNext(nn.Module):
         for layer, width in zip(layers, widths):
             stages.append(
                 nn.Sequential(
-                    *[StochasticDepth(CNBlock(width), stodepth_survive)
-                        for _ in range(layer)]
+                    *[CNBlock(width, stodepth_survive) for _ in range(layer)]
                 )
             )
         self.stages = nn.ModuleList(stages)
