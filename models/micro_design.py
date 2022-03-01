@@ -16,7 +16,7 @@ class InvertedBottleneck(nn.Module):
         # NOTE: Replacing BatchNorm2d with LayerNorm
         norm_layer = LayerNorm
         
-        # NOTE:Replacing RELU with GELU
+        # NOTE: Replacing RELU with GELU
         self.act = nn.GELU()
 
         expand_width = planes * self.expansion
