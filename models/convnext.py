@@ -1,4 +1,4 @@
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -8,6 +8,7 @@ from common import benchmark
 
 
 class StochasticDepth(nn.Module):
+    """Randomly drop a layer"""
     def __init__(self, module: nn.Module, survival_rate: float = 1.) -> None:
         super().__init__()
         self.module = module
@@ -17,8 +18,17 @@ class StochasticDepth(nn.Module):
         return 0 if self.training and self._drop.sample() else self.module(x)
 
 
+class LayerNorm(nn.LayerNorm):
+    """Permute the input tensor so that the channel dimension is the last one."""
+    def __init__(self, num_features: int, eps: float = 1e-5, **kwargs: Any) -> None:
+        super().__init__(num_features, eps=eps, **kwargs)
+    
+    def forward(self, x: Tensor) -> Tensor:
+        return super().forward(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+
 def dw_conv7x7(in_planes: int, out_planes: int, **kwargs: Any) -> nn.Conv2d:
-    return nn.Conv2d(in_planes, out_planes, 7, padding='same', groups=in_planes, **kwargs)
+    return nn.Conv2d(in_planes, out_planes, 7, padding=3, groups=in_planes, **kwargs)
 
 def conv1x1(in_planes: int, out_planes: int, **kwargs: Any) -> nn.Conv2d:
     return nn.Conv2d(in_planes, out_planes, 1, **kwargs)
@@ -30,22 +40,21 @@ def patch_conv(in_planes: int, out_planes: int, patch_size: int, **kwargs: Any) 
 class CNBlock(nn.Module):
     expansion: int = 4
 
-    def __init__(self, planes: int, stodepth_survive: Optional[float] = 1.) -> None:
+    def __init__(self, planes: int) -> None:
         super().__init__()
 
         expand_width = planes * self.expansion
-        main_path = nn.Sequential(
-            dw_conv7x7(planes, planes, depthwise=True),
-            nn.LayerNorm(planes, eps=1e-6),
+        main = nn.Sequential(
+            dw_conv7x7(planes, planes),
+            LayerNorm(planes),
             conv1x1(planes, expand_width),
             nn.GELU(),
             conv1x1(expand_width, planes)
         )
-        self.main_path = StochasticDepth(main_path, stodepth_survive) \
-                         if stodepth_survive < 1. else main_path
+        self.main = main
         
     def forward(self, x: Tensor) -> Tensor:
-        return x + self.main_path(x)
+        return x + self.main(x)
 
 
 class ConvNext(nn.Module):
@@ -59,36 +68,39 @@ class ConvNext(nn.Module):
         assert len(layers) == len(widths) == 4, "Length of layers and widths param must be 4"
         super().__init__()
 
+        
         # Patchify downsampling stem
         stem = nn.Sequential(
             patch_conv(3, widths[0], patch_size=4),
-            nn.LayerNorm(widths[0], eps=1e-6)
+            LayerNorm(widths[0], eps=1e-6)
         )
 
         # Res1 -> Res4
-        self.stages = []
+        stages = []
         for layer, width in zip(layers, widths):
-            self.stages.append(
+            stages.append(
                 nn.Sequential(
-                    *[CNBlock(width, stodepth_survive=stodepth_survive) \
+                    *[StochasticDepth(CNBlock(width), stodepth_survive)
                         for _ in range(layer)]
                 )
             )
+        self.stages = nn.ModuleList(stages)
 
         # Intermediate downsampling layers
-        self.ds_layers = [stem]
+        ds_layers = [stem]
         for cur_width, next_width in zip(widths, widths[1:]):
-            self.ds_layers.append(
+            ds_layers.append(
                 nn.Sequential(
-                    nn.LayerNorm(cur_width, eps=1e-6),
+                    LayerNorm(cur_width, eps=1e-6),
                     patch_conv(cur_width, next_width, patch_size=2)
                 )
             )
+        self.ds_layers = nn.ModuleList(ds_layers)
 
         # Pooling and FC
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.n2 = nn.LayerNorm(width[-1], eps=1e-6)
-        self.fc = nn.Linear(width[-1], num_classes)
+        self.n2 = LayerNorm(widths[-1], eps=1e-6)
+        self.fc = nn.Linear(widths[-1], num_classes)
 
         # Initialize weights
         for m in self.modules():
@@ -135,6 +147,6 @@ def convnext_xl(**kwargs: Any) -> ConvNext:
 
 
 if __name__ == "__main__":
-    model = convnext_t(stodepth_survival_rate=1.0)
+    model = convnext_t(stodepth_survive=1.0)
     benchmark(model)
-    # print(model)
+    print(model)
