@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from common import StochasticModule, benchmark, conv3x3, conv1x1
+from .common import StochasticModule, benchmark, conv3x3, conv1x1
 
 class BasicBlock(nn.Module):
     expansion: int = 1

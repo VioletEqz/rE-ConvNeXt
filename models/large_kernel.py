@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from common import StochasticModule, benchmark, conv1x1, conv7x7
+from .common import StochasticModule, benchmark, conv1x1, conv7x7
 
 
 class InvertedBottleneck(nn.Module):
