@@ -35,6 +35,19 @@ The implementations are in `models` folder in the following order:
 
 - Cleaned up the code to get the final checkpoint in [`convnext.py`](models/convnext.py).
 
+In each checkpoint, the changes made with respect to the previous checkpoint, except for [`convnext.py`](models/convnext.py), are documented in the code in `NOTE` comments, e.g.
+
+```py
+# NOTE: Inverted bottleneck
+expand_width = planes * self.expansion
+self.conv1 = conv1x1(inplanes, expand_width)
+self.n1 = norm_layer(expand_width)
+self.conv2 = conv3x3(expand_width, expand_width, stride, depthwise=True)
+self.n2 = norm_layer(expand_width)
+self.conv3 = conv1x1(expand_width, planes)
+self.n3 = norm_layer(planes)
+```
+
 ## References
 - [The ConvNeXt paper](https://arxiv.org/abs/2201.03545) which this implementation is based on.
 - [The official implementation](https://github.com/facebookresearch/ConvNeXt), where we double checked to make sure the final checkpoint [`convnext.py`](models/convnext.py) is equivalent to ConvNeXt.
