@@ -37,5 +37,5 @@ The implementations are in `models` folder in the following order:
 
 ## References
 - [The ConvNeXt paper](https://arxiv.org/abs/2201.03545) which this implementation is based on.
-- [The official implementation](https://github.com/facebookresearch/ConvNeXt), where we double checked to make sure the final checkpoint `convnext.py` is equivalent to the ConvNeXt.
+- [The official implementation](https://github.com/facebookresearch/ConvNeXt), where we double checked to make sure the final checkpoint [`convnext.py`](models/convnext.py) is equivalent to ConvNeXt.
 - [Torchvision's resnet](https://pytorch.org/vision/0.8/_modules/torchvision/models/resnet.html).
